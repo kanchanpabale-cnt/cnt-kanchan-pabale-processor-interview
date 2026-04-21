@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.*.local
+*.log
+npm-debug.log*
+.DS_Store
+.vscode/
+.idea/
+coverage/
+.turbo/
+.cache/
+tmp/
+uploads/
+
+# Prisma
+database/prisma/migrations/dev.db*
+
+# Vite
+client/dist/
+client/.vite/
+
+# Server
+server/dist/

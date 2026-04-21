@@ -1,0 +1,89 @@
+// Card Processor — Prisma schema
+// Money columns use Decimal (Prisma decimal.js Decimal type). Never Float.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  ANALYST
+}
+
+enum CardType {
+  AMEX
+  VISA
+  MASTERCARD
+  DISCOVER
+}
+
+enum TxnStatus {
+  ACCEPTED
+  REJECTED
+}
+
+model User {
+  id              String           @id @default(cuid())
+  email           String           @unique
+  passwordHash    String
+  name            String
+  role            Role             @default(ANALYST)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  ingestionBatches IngestionBatch[]
+}
+
+model Card {
+  id           String        @id @default(cuid())
+  cardNumber   String        @unique
+  last4        String
+  cardType     CardType
+  holderName   String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  transactions Transaction[]
+
+  @@index([cardType])
+  @@index([last4])
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  cardId          String?
+  card            Card?           @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  rawCardNumber   String
+  timestamp       DateTime
+  amount          Decimal         @db.Decimal(14, 2)
+  status          TxnStatus
+  rejectionReason String?
+  batchId         String?
+  batch           IngestionBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  createdAt       DateTime        @default(now())
+
+  @@index([cardId])
+  @@index([timestamp])
+  @@index([status])
+  @@index([batchId])
+}
+
+model IngestionBatch {
+  id            String        @id @default(cuid())
+  filename      String
+  format        String
+  totalRows     Int
+  acceptedRows  Int
+  rejectedRows  Int
+  uploadedById  String
+  uploadedBy    User          @relation(fields: [uploadedById], references: [id])
+  createdAt     DateTime      @default(now())
+  transactions  Transaction[]
+
+  @@index([uploadedById])
+  @@index([createdAt])
+}

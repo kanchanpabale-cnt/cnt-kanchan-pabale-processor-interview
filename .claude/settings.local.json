@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(node -e \"const ic = require\\('lucide-react'\\); console.log\\(['ChevronLeft','ChevronRight','ChevronsLeft','ChevronsRight'].map\\(k=>k+':'+!!ic[k]\\).join\\(' '\\)\\);\")",
+      "Bash(npx tsx *)",
+      "Bash(npx jest *)",
+      "Bash(grep -v \"^--$\")"
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "card-processor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SignaPay-themed card transaction processor — fullstack monorepo",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w server && npm run build -w client",
+    "start": "npm run start -w server",
+    "db:generate": "prisma generate --schema database/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema database/prisma/schema.prisma",
+    "db:reset": "prisma migrate reset --schema database/prisma/schema.prisma --force",
+    "db:seed": "tsx database/prisma/seed.ts",
+    "db:studio": "prisma studio --schema database/prisma/schema.prisma",
+    "test": "npm test -w server && npm test -w client",
+    "test:server": "npm test -w server",
+    "test:client": "npm test -w client",
+    "test:coverage": "npm run test:coverage -w server && npm run test:coverage -w client",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "postinstall": "npm run db:generate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "prisma": {
+    "schema": "database/prisma/schema.prisma",
+    "seed": "tsx database/prisma/seed.ts"
+  }
+}

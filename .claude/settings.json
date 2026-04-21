@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test *)",
+      "Bash(curl -s http://localhost:4000/health)",
+      "Bash(npm run *)",
+      "Bash(pkill -f \"tsx watch\")"
+    ]
+  }
+}
