@@ -1,7 +1,8 @@
-import type { IngestionBatch } from '@prisma/client';
+import type { CardType, IngestionBatch } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { logger } from '../../lib/logger';
 import { HttpError } from '../../middleware/error';
+import { cardRepo, ingestionBatchRepo, transactionRepo } from '../../repositories';
 import { parseCsv } from './csv.parser';
 import { parseJson } from './json.parser';
 import { parseXml } from './xml.parser';
@@ -66,20 +67,24 @@ export async function ingestBuffer(input: IngestInput): Promise<IngestResult> {
   const accepted = validated.filter((r) => r.ok === true);
   const rejected = validated.filter((r) => r.ok === false);
 
-  // Pre-create/upsert all unique cards from accepted rows.
+  // Deduplicate cards referenced by accepted rows so we upsert each at most once.
   const uniqueCards = new Map<
     string,
-    { cardNumber: string; last4: string; cardType: 'AMEX' | 'VISA' | 'MASTERCARD' | 'DISCOVER' }
+    { cardNumber: string; last4: string; cardType: CardType }
   >();
   for (const r of accepted) {
     if (r.ok && !uniqueCards.has(r.cardNumber)) {
-      uniqueCards.set(r.cardNumber, { cardNumber: r.cardNumber, last4: r.last4, cardType: r.cardType });
+      uniqueCards.set(r.cardNumber, {
+        cardNumber: r.cardNumber,
+        last4: r.last4,
+        cardType: r.cardType,
+      });
     }
   }
 
   const batch = await prisma.$transaction(async (tx) => {
-    const created = await tx.ingestionBatch.create({
-      data: {
+    const created = await ingestionBatchRepo.create(
+      {
         filename: input.filename,
         format: input.format,
         totalRows: validated.length,
@@ -87,58 +92,36 @@ export async function ingestBuffer(input: IngestInput): Promise<IngestResult> {
         rejectedRows: rejected.length,
         uploadedById: input.uploaderId,
       },
-    });
+      tx,
+    );
 
-    // Upsert cards
-    for (const c of uniqueCards.values()) {
-      await tx.card.upsert({
-        where: { cardNumber: c.cardNumber },
-        update: {},
-        create: { cardNumber: c.cardNumber, last4: c.last4, cardType: c.cardType },
-      });
-    }
+    await cardRepo.upsertMany(Array.from(uniqueCards.values()), tx);
+    const cardIds = await cardRepo.findIdsByNumbers(Array.from(uniqueCards.keys()), tx);
 
-    // Map cardNumber -> id once
-    const cardIds = new Map<string, string>();
-    const cards = await tx.card.findMany({
-      where: { cardNumber: { in: Array.from(uniqueCards.keys()) } },
-      select: { id: true, cardNumber: true },
-    });
-    for (const c of cards) cardIds.set(c.cardNumber, c.id);
-
-    // Bulk insert transactions
-    if (accepted.length > 0) {
-      await tx.transaction.createMany({
-        data: accepted.map((r) => {
+    await transactionRepo.bulkInsertBatch(
+      {
+        accepted: accepted.map((r) => {
           if (!r.ok) throw new Error('unreachable');
           return {
             cardId: cardIds.get(r.cardNumber)!,
             rawCardNumber: r.cardNumber,
             timestamp: r.timestamp,
             amount: r.amount,
-            status: 'ACCEPTED',
-            batchId: created.id,
           };
         }),
-      });
-    }
-
-    if (rejected.length > 0) {
-      await tx.transaction.createMany({
-        data: rejected.map((r) => {
+        rejected: rejected.map((r) => {
           if (r.ok) throw new Error('unreachable');
           return {
-            cardId: null,
             rawCardNumber: r.rawCardNumber,
             timestamp: r.timestamp ?? new Date(0),
             amount: r.amount ?? '0',
-            status: 'REJECTED',
             rejectionReason: r.rejectionReason,
-            batchId: created.id,
           };
         }),
-      });
-    }
+        batchId: created.id,
+      },
+      tx,
+    );
 
     return created;
   });

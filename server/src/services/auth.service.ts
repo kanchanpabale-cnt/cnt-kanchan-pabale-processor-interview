@@ -1,11 +1,11 @@
 import bcrypt from 'bcryptjs';
-import { prisma } from '../lib/prisma';
 import { signToken } from '../lib/jwt';
 import { HttpError } from '../middleware/error';
+import { userRepo } from '../repositories';
 import type { LoginInput } from '../validators/auth';
 
 export async function login(input: LoginInput) {
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  const user = await userRepo.findByEmailWithHash(input.email);
   if (!user) throw new HttpError(401, 'Invalid credentials', 'Unauthorized');
 
   const ok = await bcrypt.compare(input.password, user.passwordHash);
@@ -19,10 +19,7 @@ export async function login(input: LoginInput) {
 }
 
 export async function getMe(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, createdAt: true },
-  });
+  const user = await userRepo.findProfileById(userId);
   if (!user) throw new HttpError(404, 'User not found', 'NotFound');
   return user;
 }

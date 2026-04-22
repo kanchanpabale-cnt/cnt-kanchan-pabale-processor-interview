@@ -1,5 +1,5 @@
-import { prisma } from '../lib/prisma';
 import { getP95LatencyMs } from '../middleware/requestTiming';
+import { transactionRepo } from '../repositories';
 
 export interface ShowcaseStats {
   authorizedVolume: string;
@@ -15,12 +15,9 @@ export interface ShowcaseStats {
  */
 export async function showcaseStats(): Promise<ShowcaseStats> {
   const [accepted, rejected, agg] = await Promise.all([
-    prisma.transaction.count({ where: { status: 'ACCEPTED' } }),
-    prisma.transaction.count({ where: { status: 'REJECTED' } }),
-    prisma.transaction.aggregate({
-      where: { status: 'ACCEPTED' },
-      _sum: { amount: true },
-    }),
+    transactionRepo.countByStatus('ACCEPTED'),
+    transactionRepo.countByStatus('REJECTED'),
+    transactionRepo.sumAmountByStatus('ACCEPTED'),
   ]);
 
   const total = accepted + rejected;

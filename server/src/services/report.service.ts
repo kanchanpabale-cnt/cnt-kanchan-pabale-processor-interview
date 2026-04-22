@@ -1,19 +1,15 @@
-import { prisma } from '../lib/prisma';
+import { cardRepo, ingestionBatchRepo, transactionRepo } from '../repositories';
 import { maskPan } from '../utils/maskPan';
 
 export async function summary() {
-  const [cardCount, txTotal, txAccepted, txRejected, batchCount] = await Promise.all([
-    prisma.card.count(),
-    prisma.transaction.count(),
-    prisma.transaction.count({ where: { status: 'ACCEPTED' } }),
-    prisma.transaction.count({ where: { status: 'REJECTED' } }),
-    prisma.ingestionBatch.count(),
+  const [cardCount, txTotal, txAccepted, txRejected, batchCount, acceptedAgg] = await Promise.all([
+    cardRepo.count(),
+    transactionRepo.countByStatus(undefined),
+    transactionRepo.countByStatus('ACCEPTED'),
+    transactionRepo.countByStatus('REJECTED'),
+    ingestionBatchRepo.count(),
+    transactionRepo.sumAmountByStatus('ACCEPTED'),
   ]);
-
-  const acceptedAgg = await prisma.transaction.aggregate({
-    where: { status: 'ACCEPTED' },
-    _sum: { amount: true },
-  });
 
   return {
     cards: cardCount,
@@ -26,22 +22,14 @@ export async function summary() {
 }
 
 export async function byCard() {
-  const rows = await prisma.transaction.groupBy({
-    by: ['cardId'],
-    where: { status: 'ACCEPTED', cardId: { not: null } },
-    _count: { _all: true },
-    _sum: { amount: true },
-    orderBy: { _sum: { amount: 'desc' } },
-  });
+  const rows = await transactionRepo.groupAcceptedByCard();
 
-  const cards = await prisma.card.findMany({
-    where: { id: { in: rows.map((r) => r.cardId!).filter(Boolean) } },
-    select: { id: true, cardNumber: true, last4: true, cardType: true, holderName: true },
-  });
+  const cardIds = rows.map((r) => r.cardId).filter((id): id is string => !!id);
+  const cards = await cardRepo.findManyByIds(cardIds);
   const cardMap = new Map(cards.map((c) => [c.id, c]));
 
   return rows.map((r) => {
-    const c = cardMap.get(r.cardId!);
+    const c = r.cardId ? cardMap.get(r.cardId) : undefined;
     return {
       cardId: r.cardId,
       maskedNumber: c ? maskPan(c.cardNumber) : null,
@@ -59,11 +47,7 @@ export async function byCardType() {
   const types = ['AMEX', 'VISA', 'MASTERCARD', 'DISCOVER'] as const;
   return Promise.all(
     types.map(async (t) => {
-      const agg = await prisma.transaction.aggregate({
-        where: { status: 'ACCEPTED', card: { cardType: t } },
-        _count: { _all: true },
-        _sum: { amount: true },
-      });
+      const agg = await transactionRepo.aggregateByCardType(t);
       return {
         cardType: t,
         count: agg._count._all,
@@ -74,16 +58,7 @@ export async function byCardType() {
 }
 
 export async function byDay() {
-  // Use raw SQL for date-bucketing — Prisma groupBy doesn't support date_trunc.
-  const rows = await prisma.$queryRawUnsafe<
-    Array<{ day: Date; count: bigint; total: string }>
-  >(
-    `SELECT date_trunc('day', "timestamp") AS day, COUNT(*)::bigint AS count, COALESCE(SUM(amount), 0)::text AS total
-     FROM "Transaction"
-     WHERE status = 'ACCEPTED'
-     GROUP BY 1
-     ORDER BY 1 ASC`,
-  );
+  const rows = await transactionRepo.aggregateByDay();
   return rows.map((r) => ({
     date: r.day.toISOString().slice(0, 10),
     count: Number(r.count),
@@ -92,12 +67,7 @@ export async function byDay() {
 }
 
 export async function rejectedByReason() {
-  const rows = await prisma.transaction.groupBy({
-    by: ['rejectionReason'],
-    where: { status: 'REJECTED' },
-    _count: { _all: true },
-    orderBy: { _count: { rejectionReason: 'desc' } },
-  });
+  const rows = await transactionRepo.groupRejectedByReason();
   return rows.map((r) => ({
     reason: r.rejectionReason ?? 'UNKNOWN',
     count: r._count._all,
@@ -105,15 +75,7 @@ export async function rejectedByReason() {
 }
 
 export async function rejected(page: number, pageSize: number) {
-  const [total, items] = await Promise.all([
-    prisma.transaction.count({ where: { status: 'REJECTED' } }),
-    prisma.transaction.findMany({
-      where: { status: 'REJECTED' },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ]);
+  const { total, items } = await transactionRepo.listRejectedPaginated(page, pageSize);
   return {
     total,
     page,
